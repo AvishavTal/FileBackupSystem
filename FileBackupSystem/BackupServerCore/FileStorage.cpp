@@ -12,14 +12,23 @@ namespace fs = std::filesystem;
 
 void FileStorage::saveFile(unsigned int userId, const std::string& filename, const std::vector<std::byte>& content)
 {
-    // 1. Security Validation
-    validateFilename(filename);
+	validateFilename(filename);
+	fs::path fullPath = prepareFilePath(userId, filename);
+	writeToFile(fullPath, content);
+}
 
-    // 2. Prepare Directory & Path
-    fs::path fullPath = prepareFilePath(userId, filename);
+void FileStorage::deleteFile(unsigned int userId, const std::string& filename)
+{
+	validateFilename(filename);
+	fs::path fullFilePath = prepareFilePath(userId, filename);
 
-    // 3. Perform the actual write
-    writeToFile(fullPath, content);
+	if (!fs::exists(fullFilePath)) {
+		throw std::runtime_error("File not found: " + filename);
+	}
+
+	if (!fs::remove(fullFilePath)) {
+		throw std::runtime_error("Failed to delete file: " + filename);
+	}
 }
 
 // ==========================================
@@ -28,59 +37,43 @@ void FileStorage::saveFile(unsigned int userId, const std::string& filename, con
 
 void FileStorage::validateFilename(const std::string& filename) const
 {
-    if (filename.empty()) {
-        throw std::invalid_argument("Security Violation: Filename is empty");
-    }
-
-    // Prevent Path Traversal (e.g., "../windows")
-    if (filename.find("..") != std::string::npos) {
-        throw std::invalid_argument("Security Violation: Filename contains '..'");
-    }
-
-    // Prevent absolute paths or directory switching
-    if (filename.find('/') != std::string::npos || filename.find('\\') != std::string::npos) {
-        throw std::invalid_argument("Security Violation: Filename contains path separators");
-    }
+	if (filename.empty()) {
+		throw std::invalid_argument("Security Violation: Filename is empty");
+	}
+	if (filename.find("..") != std::string::npos) {
+		throw std::invalid_argument("Security Violation: Filename contains '..'");
+	}
+	if (filename.find('/') != std::string::npos || filename.find('\\') != std::string::npos) {
+		throw std::invalid_argument("Security Violation: Filename contains path separators");
+	}
 }
 
 std::filesystem::path FileStorage::prepareFilePath(unsigned int userId, const std::string& filename) const
 {
-    const std::string baseDir = "backupsvr";
+	const std::string baseDir = "backupsvr";
+	fs::path userDir = fs::path(baseDir) / std::to_string(userId);
 
-    // Construct user directory path
-    fs::path userDir = fs::path(baseDir) / std::to_string(userId);
-
-    // Ensure the directory exists
-    try {
-        if (!fs::exists(userDir)) {
-            fs::create_directories(userDir);
-        }
-    }
-    catch (const fs::filesystem_error& e) {
-        throw std::runtime_error("Filesystem error while creating directory: " + std::string(e.what()));
-    }
-
-    // Return the full path including filename
-    return userDir / filename;
+	try {
+		if (!fs::exists(userDir)) {
+			fs::create_directories(userDir);
+		}
+	}
+	catch (const fs::filesystem_error& e) {
+		throw std::runtime_error("Filesystem error: " + std::string(e.what()));
+	}
+	return userDir / filename;
 }
 
 void FileStorage::writeToFile(const std::filesystem::path& path, const std::vector<std::byte>& content) const
 {
-    // Open file in binary mode
-    std::ofstream outFile(path, std::ios::binary);
+	std::ofstream outFile(path, std::ios::binary);
+	if (!outFile) {
+		throw std::runtime_error("Failed to open file for writing: " + path.string());
+	}
+	outFile.write(reinterpret_cast<const char*>(content.data()), content.size());
+	outFile.close();
 
-    if (!outFile) {
-        throw std::runtime_error("Failed to open file for writing: " + path.string());
-    }
-
-    // Write data: reinterpret_cast is required to treat std::byte* as char* for fstream
-    // storage.data() returns a pointer to the underlying array
-    outFile.write(reinterpret_cast<const char*>(content.data()), content.size());
-
-    outFile.close();
-
-    // Verify write success
-    if (!outFile.good()) {
-        throw std::runtime_error("I/O Error occurred while writing to file.");
-    }
+	if (!outFile.good()) {
+		throw std::runtime_error("I/O Error occurred while writing to file.");
+	}
 }

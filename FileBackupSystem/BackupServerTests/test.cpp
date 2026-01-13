@@ -71,3 +71,46 @@ TEST(FileStorageTests, SaveFile_PathTraversal_ThrowsException) {
     // Expect invalid_argument due to ".." in filename
     EXPECT_THROW(storage.saveFile(userId, maliciousFilename, content), std::invalid_argument);
 }
+
+TEST(FileStorageTests, DeleteFile_FileExists_DeletesFile) {
+    FileStorage storage;
+    unsigned int userId = 1234;
+    std::string filename = "file_to_delete.txt";
+    std::vector<std::byte> content = { std::byte{0x41} };
+    std::string fullPath = "backupsvr\\" + std::to_string(userId) + "\\" + filename;
+
+    cleanUp("backupsvr");
+
+    // Setup: Create file first
+    storage.saveFile(userId, filename, content);
+    ASSERT_TRUE(std::filesystem::exists(fullPath));
+
+    // Act
+    storage.deleteFile(userId, filename);
+
+    // Assert
+    EXPECT_FALSE(std::filesystem::exists(fullPath)) << "File should have been deleted.";
+
+    cleanUp("backupsvr");
+}
+
+TEST(FileStorageTests, DeleteFile_FileDoesNotExist_ThrowsException) {
+    FileStorage storage;
+    unsigned int userId = 1234;
+    std::string filename = "missing.txt";
+
+    cleanUp("backupsvr");
+    // Ensure user directory exists
+    storage.saveFile(userId, "setup.tmp", { std::byte{0x00} });
+
+    // Expect runtime_error (logic for Status 1001)
+    EXPECT_THROW(storage.deleteFile(userId, filename), std::runtime_error);
+
+    cleanUp("backupsvr");
+}
+
+TEST(FileStorageTests, DeleteFile_PathTraversal_ThrowsException) {
+    FileStorage storage;
+    // Should fail validation before checking existence
+    EXPECT_THROW(storage.deleteFile(1234, "..\\windows\\system32\\calc.exe"), std::invalid_argument);
+}
