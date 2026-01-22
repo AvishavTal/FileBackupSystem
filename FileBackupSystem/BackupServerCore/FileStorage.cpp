@@ -41,6 +41,15 @@ std::string FileStorage::listFiles(unsigned int userId) const {
 	return listFileName;
 }
 
+std::vector<std::byte> FileStorage::restoreFile(unsigned int userId, const std::string& filename) {
+	validateFilename(filename);
+	fs::path fullFilePath = prepareFilePath(userId, filename);
+	if(!fs::exists(fullFilePath)) {
+		throw std::runtime_error("File not found: " + filename);
+	}
+	return readFile(fullFilePath);
+}
+
 // ==========================================
 // Private Helper Functions
 // ==========================================
@@ -130,4 +139,22 @@ void FileStorage::writeLinesToFile(const std::filesystem::path& path, const std:
 	if (!outFile.good()) {
 		throw std::runtime_error("I/O Error occurred while writing to file.");
 	}
+}
+
+std::vector<std::byte> FileStorage::readFile(const std::filesystem::path& path) const
+{
+	std::ifstream inFile(path, std::ios::binary | std::ios::ate);//open at end to get size
+	if (!inFile) {
+		throw std::runtime_error("Failed to open file for reading: " + path.string());
+	}
+	std::streamsize size = inFile.tellg();
+	if(size==0) {
+		return {};//empty file
+	}
+	inFile.seekg(0, std::ios::beg);//move to beginning
+	std::vector<std::byte> buffer(size);
+	if(!inFile.read(reinterpret_cast<char*>(buffer.data()), size)) {
+		throw std::runtime_error("I/O Error occurred while reading from file.");
+	}
+	return buffer;
 }

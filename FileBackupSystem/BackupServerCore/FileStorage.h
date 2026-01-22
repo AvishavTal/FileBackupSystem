@@ -8,10 +8,15 @@ class FileStorage {
 public:
 	void saveFile(unsigned int userId, const std::string& filename, const std::vector<std::byte>& content);
 
-	// זו השורה שהייתה חסרה לך ולכן הטסט צעק:
+
 	void deleteFile(unsigned int userId, const std::string& filename);
 
 	std::string listFiles(unsigned int userId) const;
+
+	/**
+	 * Retrieves the content of a specific file.
+	 */
+	std::vector<std::byte> restoreFile(unsigned int userId, const std::string& filename);
 private:
 	void validateFilename(const std::string& filename) const;
 	std::filesystem::path getOrCreateUserDir(unsigned int userId) const;
@@ -21,4 +26,5 @@ private:
 
 	void writeLinesToFile(const std::filesystem::path& path, const std::vector<std::string>& lines) const;
 	std::vector<std::string> getAllFilenames(const std::filesystem::path& directoryPath) const;
+	std::vector<std::byte> readFile(const std::filesystem::path& path) const;
 };

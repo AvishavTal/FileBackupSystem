@@ -175,3 +175,40 @@ TEST(FileStorageTests, ListFiles_ContentListsExistingFiles) {
 
     cleanUp("backupsvr");
 }
+
+TEST(FileStorageTests, RestoreFile_FileExists_ReturnsCorrectContent) {
+    FileStorage storage;
+    unsigned int userId = 1234;
+    std::string filename = "restore_me.bin";
+    std::vector<std::byte> originalContent = { std::byte{0x10}, std::byte{0x20}, std::byte{0x30} };
+
+    cleanUp("backupsvr");
+
+    // 1. Setup: Save file
+    storage.saveFile(userId, filename, originalContent);
+
+    // 2. Act
+    // בשלב ה-Red: השורה הזו תזרוק שגיאה והטסט ייכשל (וזה מה שאנחנו רוצים).
+    // בשלב ה-Green: השורה הזו תחזיר את התוכן והטסט ימשיך ל-Assert.
+    std::vector<std::byte> restoredContent = storage.restoreFile(userId, filename);
+
+    // 3. Assert
+    EXPECT_EQ(restoredContent, originalContent);
+
+    cleanUp("backupsvr");
+}
+
+TEST(FileStorageTests, RestoreFile_FileDoesNotExist_ThrowsException) {
+    FileStorage storage;
+    unsigned int userId = 1234;
+    cleanUp("backupsvr");
+
+    storage.saveFile(userId, "setup.dat", { std::byte{0x00} });
+
+    // כאן אנחנו מצפים לשגיאה ספציפית של "File not found"
+    // כרגע זה "יעבור" טכנית כי הפונקציה זורקת "Not implemented" שזה גם runtime_error.
+    // אבל זה בסדר לשלב הזה.
+    EXPECT_THROW(storage.restoreFile(userId, "ghost_file.txt"), std::runtime_error);
+
+    cleanUp("backupsvr");
+}
