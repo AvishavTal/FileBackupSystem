@@ -114,3 +114,64 @@ TEST(FileStorageTests, DeleteFile_PathTraversal_ThrowsException) {
     // Should fail validation before checking existence
     EXPECT_THROW(storage.deleteFile(1234, "..\\windows\\system32\\calc.exe"), std::invalid_argument);
 }
+
+TEST(FileStorageTests, ListFiles_Generates32CharRandomName) {
+    FileStorage storage;
+    unsigned int userId = 9999;
+    cleanUp("backupsvr");
+
+    // Create a dummy file so directory exists
+    storage.saveFile(userId, "dummy.txt", { std::byte{0x00} });
+
+    std::string listFileName = storage.listFiles(userId);
+
+    // Verify length and alphanumeric
+    EXPECT_EQ(listFileName.length(), 32);
+    EXPECT_TRUE(std::all_of(listFileName.begin(), listFileName.end(), [](char c) {
+        return std::isalnum(c);
+        }));
+
+    cleanUp("backupsvr");
+}
+
+TEST(FileStorageTests, ListFiles_ContentListsExistingFiles) {
+    FileStorage storage;
+    unsigned int userId = 1234;
+    cleanUp("backupsvr");
+
+    // Arrange: Create two files
+    storage.saveFile(userId, "fileA.txt", { std::byte{0x1} });
+    storage.saveFile(userId, "fileB.jpg", { std::byte{0x2} });
+
+    // Act
+    std::string listFileName = storage.listFiles(userId);
+    std::string listFilePath = "backupsvr\\" + std::to_string(userId) + "\\" + listFileName;
+
+    // Assert: Check content of the generated list file
+    ASSERT_TRUE(std::filesystem::exists(listFilePath));
+
+    // --- Scope Block Start ---
+    // פותחים סקופ כדי ש-inFile ייסגר אוטומטית בסיומו
+    {
+        std::ifstream inFile(listFilePath);
+        std::vector<std::string> lines;
+        std::string line;
+        while (std::getline(inFile, line)) {
+            lines.push_back(line);
+        }
+
+        // בדיקה שהקבצים שיצרנו מופיעים ברשימה
+        bool foundA = false, foundB = false;
+        for (const auto& l : lines) {
+            if (l == "fileA.txt") foundA = true;
+            if (l == "fileB.jpg") foundB = true;
+        }
+
+        EXPECT_TRUE(foundA) << "List file missing fileA.txt";
+        EXPECT_TRUE(foundB) << "List file missing fileB.jpg";
+    }
+    // --- Scope Block End ---
+    // כאן הקובץ inFile נסגר פיזית, ולכן ה-cleanUp למטה יעבוד
+
+    cleanUp("backupsvr");
+}
