@@ -4,6 +4,8 @@
 #include <filesystem>
 #include <cstddef> // Required for std::byte
 #include "FileStorage.h"
+#include "Message.h" // וודא שה-Include הזה עובד (אולי צריך ../BackupServerCore/Message.h)
+
 
 // Helper function to clean up test artifacts
 void cleanUp(const std::string& path) {
@@ -211,4 +213,111 @@ TEST(FileStorageTests, RestoreFile_FileDoesNotExist_ThrowsException) {
     EXPECT_THROW(storage.restoreFile(userId, "ghost_file.txt"), std::runtime_error);
 
     cleanUp("backupsvr");
+}
+
+
+// --- Protocol Parsing Tests (Client -> Server) ---
+
+TEST(ProtocolTests, ParseRequest_SaveFile_ParsesCorrectly) {
+    // בניית באפר ידני המדמה את מה שמגיע מהרשת עבור שמירת קובץ (Op 200)
+    // Structure: UserID(4), Ver(1), Op(1), NameLen(2), Name(...), Size(4), Payload(...)
+
+    std::vector<std::byte> buffer;
+
+    // User ID: 1234 (0x04D2) -> Little Endian: D2 04 00 00
+    buffer.push_back(std::byte{ 0xD2 }); buffer.push_back(std::byte{ 0x04 }); buffer.push_back(std::byte{ 0x00 }); buffer.push_back(std::byte{ 0x00 });
+
+    // Version: 1
+    buffer.push_back(std::byte{ 1 });
+
+    // Op: 200 (0xC8)
+    buffer.push_back(std::byte{ 200 });
+
+    // Name Len: 4 ("test") -> 04 00
+    buffer.push_back(std::byte{ 4 }); buffer.push_back(std::byte{ 0 });
+
+    // Filename: "test"
+    buffer.push_back(std::byte{ 't' }); buffer.push_back(std::byte{ 'e' }); buffer.push_back(std::byte{ 's' }); buffer.push_back(std::byte{ 't' });
+
+    // Size: 3 -> 03 00 00 00
+    buffer.push_back(std::byte{ 3 }); buffer.push_back(std::byte{ 0 }); buffer.push_back(std::byte{ 0 }); buffer.push_back(std::byte{ 0 });
+
+    // Payload: ABC
+    buffer.push_back(std::byte{ 'A' }); buffer.push_back(std::byte{ 'B' }); buffer.push_back(std::byte{ 'C' });
+
+    // Act
+    ParsedRequest req = Message::parseRequest(buffer);
+
+    // Assert
+    EXPECT_EQ(req.userId, 1234);
+    EXPECT_EQ(req.version, 1);
+    EXPECT_EQ(req.op, 200);
+    EXPECT_EQ(req.filename, "test");
+    ASSERT_EQ(req.payload.size(), 3);
+    EXPECT_EQ(req.payload[0], std::byte{ 'A' });
+}
+
+TEST(ProtocolTests, ParseRequest_ListFiles_ParsesCorrectly) {
+    // Op 203 (List) is special: No filename, no size, no payload.
+    // Structure: UserID(4), Ver(1), Op(1) -> Total 6 bytes.
+
+    std::vector<std::byte> buffer;
+    // User: 1234
+    buffer.push_back(std::byte{ 0xD2 }); buffer.push_back(std::byte{ 0x04 }); buffer.push_back(std::byte{ 0x00 }); buffer.push_back(std::byte{ 0x00 });
+    // Version: 1
+    buffer.push_back(std::byte{ 1 });
+    // Op: 203
+    buffer.push_back(std::byte{ 203 });
+
+    ParsedRequest req = Message::parseRequest(buffer);
+
+    EXPECT_EQ(req.userId, 1234);
+    EXPECT_EQ(req.op, 203);
+    EXPECT_TRUE(req.filename.empty()); // Should be empty
+    EXPECT_TRUE(req.payload.empty());  // Should be empty
+}
+
+// --- Protocol Packing Tests (Server -> Client) ---
+
+TEST(ProtocolTests, PackResponse_SuccessWithPayload_CreatesCorrectBuffer) {
+    // Simulating response 210 (File Found)
+    // Structure: Ver(1), Status(2), NameLen(2), Name, Size(4), Payload
+
+    uint8_t version = 1;
+    uint16_t status = 210;
+    std::string filename = "hi";
+    std::vector<std::byte> payload = { std::byte{0xFF} };
+
+    std::vector<std::byte> result = Message::packResponse(version, status, filename, payload);
+
+    // Checks
+    // Ver
+    EXPECT_EQ(result[0], std::byte{ 1 });
+    // Status 210 (0x00D2) -> D2 00
+    EXPECT_EQ(result[1], std::byte{ 0xD2 });
+    EXPECT_EQ(result[2], std::byte{ 0x00 });
+    // NameLen 2 -> 02 00
+    EXPECT_EQ(result[3], std::byte{ 2 });
+    EXPECT_EQ(result[4], std::byte{ 0 });
+    // Name "hi"
+    EXPECT_EQ(result[5], std::byte{ 'h' });
+    EXPECT_EQ(result[6], std::byte{ 'i' });
+    // Size 1 -> 01 00 00 00
+    EXPECT_EQ(result[7], std::byte{ 1 });
+    EXPECT_EQ(result[10], std::byte{ 0 });
+    // Payload
+    EXPECT_EQ(result[11], std::byte{ 0xFF });
+}
+
+TEST(ProtocolTests, PackResponse_ErrorNoFiles_CreatesShortBuffer) {
+    // Status 1002 (No files) -> "Only status and version fields"
+    // Structure: Ver(1), Status(2) -> Total 3 bytes.
+
+    std::vector<std::byte> result = Message::packResponse(1, 1002);
+
+    ASSERT_EQ(result.size(), 3);
+    EXPECT_EQ(result[0], std::byte{ 1 });
+    // Status 1002 (0x03EA) -> EA 03
+    EXPECT_EQ(result[1], std::byte{ 0xEA });
+    EXPECT_EQ(result[2], std::byte{ 0x03 });
 }

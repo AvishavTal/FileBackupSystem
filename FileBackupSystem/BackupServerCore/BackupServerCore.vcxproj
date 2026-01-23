@@ -139,13 +139,17 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="BufferUtils.h" />
     <ClInclude Include="FileStorage.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="Message.h" />
     <ClInclude Include="pch.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BackupServerCore.cpp" />
+    <ClCompile Include="BufferUtils.cpp" />
     <ClCompile Include="FileStorage.cpp" />
+    <ClCompile Include="Message.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
