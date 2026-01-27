@@ -3,9 +3,12 @@
 #include <fstream>
 #include <filesystem>
 #include <cstddef> // Required for std::byte
-#include "FileStorage.h"
-#include "Message.h" // וודא שה-Include הזה עובד (אולי צריך ../BackupServerCore/Message.h)
+#include <algorithm> // Required for std::all_of
 
+// הכותרות של הפרויקט
+#include "../BackupServerCore/FileStorage.h"
+#include "../BackupServerCore/BufferUtils.h" // החדש
+#include "../BackupServerCore/Protocol.h"    // החדש
 
 // Helper function to clean up test artifacts
 void cleanUp(const std::string& path) {
@@ -13,6 +16,10 @@ void cleanUp(const std::string& path) {
         std::filesystem::remove_all(path);
     }
 }
+
+// ==========================================
+// 1. Original FileStorage Tests (As requested)
+// ==========================================
 
 TEST(FileStorageTests, SaveFile_BinaryData_SavesCorrectly) {
     // Arrange
@@ -44,13 +51,10 @@ TEST(FileStorageTests, SaveFile_BinaryData_SavesCorrectly) {
     EXPECT_TRUE(std::filesystem::exists(expectedPath)) << "File was not created on disk.";
 
     // Verify content integrity
-    // We use a scope block { } to ensure 'inFile' is closed/destroyed BEFORE we call cleanUp
     {
         std::ifstream inFile(expectedPath, std::ios::binary);
         ASSERT_TRUE(inFile.is_open()) << "Failed to open created file.";
 
-        // FIX: Read file manually and cast char to std::byte explicitly
-        // The iterator constructor caused a compilation error because char !-> std::byte implicitly
         std::vector<std::byte> savedContent;
         char c;
         while (inFile.get(c)) {
@@ -58,7 +62,7 @@ TEST(FileStorageTests, SaveFile_BinaryData_SavesCorrectly) {
         }
 
         EXPECT_EQ(savedContent, content) << "Binary content mismatch.";
-    } // inFile is closed here automatically
+    }
 
     // Cleanup
     cleanUp("backupsvr");
@@ -152,8 +156,6 @@ TEST(FileStorageTests, ListFiles_ContentListsExistingFiles) {
     // Assert: Check content of the generated list file
     ASSERT_TRUE(std::filesystem::exists(listFilePath));
 
-    // --- Scope Block Start ---
-    // פותחים סקופ כדי ש-inFile ייסגר אוטומטית בסיומו
     {
         std::ifstream inFile(listFilePath);
         std::vector<std::string> lines;
@@ -172,8 +174,6 @@ TEST(FileStorageTests, ListFiles_ContentListsExistingFiles) {
         EXPECT_TRUE(foundA) << "List file missing fileA.txt";
         EXPECT_TRUE(foundB) << "List file missing fileB.jpg";
     }
-    // --- Scope Block End ---
-    // כאן הקובץ inFile נסגר פיזית, ולכן ה-cleanUp למטה יעבוד
 
     cleanUp("backupsvr");
 }
@@ -190,8 +190,6 @@ TEST(FileStorageTests, RestoreFile_FileExists_ReturnsCorrectContent) {
     storage.saveFile(userId, filename, originalContent);
 
     // 2. Act
-    // בשלב ה-Red: השורה הזו תזרוק שגיאה והטסט ייכשל (וזה מה שאנחנו רוצים).
-    // בשלב ה-Green: השורה הזו תחזיר את התוכן והטסט ימשיך ל-Assert.
     std::vector<std::byte> restoredContent = storage.restoreFile(userId, filename);
 
     // 3. Assert
@@ -207,117 +205,46 @@ TEST(FileStorageTests, RestoreFile_FileDoesNotExist_ThrowsException) {
 
     storage.saveFile(userId, "setup.dat", { std::byte{0x00} });
 
-    // כאן אנחנו מצפים לשגיאה ספציפית של "File not found"
-    // כרגע זה "יעבור" טכנית כי הפונקציה זורקת "Not implemented" שזה גם runtime_error.
-    // אבל זה בסדר לשלב הזה.
     EXPECT_THROW(storage.restoreFile(userId, "ghost_file.txt"), std::runtime_error);
 
     cleanUp("backupsvr");
 }
 
+// ==========================================
+// 2. New Tests (Protocol & BufferUtils)
+// ==========================================
 
-// --- Protocol Parsing Tests (Client -> Server) ---
-
-TEST(ProtocolTests, ParseRequest_SaveFile_ParsesCorrectly) {
-    // בניית באפר ידני המדמה את מה שמגיע מהרשת עבור שמירת קובץ (Op 200)
-    // Structure: UserID(4), Ver(1), Op(1), NameLen(2), Name(...), Size(4), Payload(...)
-
+TEST(BufferUtilsTests, PushInt_WritesLittleEndian) {
     std::vector<std::byte> buffer;
+    uint32_t val = 0x12345678;
+    BufferUtils::pushInt(buffer, val);
 
-    // User ID: 1234 (0x04D2) -> Little Endian: D2 04 00 00
-    buffer.push_back(std::byte{ 0xD2 }); buffer.push_back(std::byte{ 0x04 }); buffer.push_back(std::byte{ 0x00 }); buffer.push_back(std::byte{ 0x00 });
-
-    // Version: 1
-    buffer.push_back(std::byte{ 1 });
-
-    // Op: 200 (0xC8)
-    buffer.push_back(std::byte{ 200 });
-
-    // Name Len: 4 ("test") -> 04 00
-    buffer.push_back(std::byte{ 4 }); buffer.push_back(std::byte{ 0 });
-
-    // Filename: "test"
-    buffer.push_back(std::byte{ 't' }); buffer.push_back(std::byte{ 'e' }); buffer.push_back(std::byte{ 's' }); buffer.push_back(std::byte{ 't' });
-
-    // Size: 3 -> 03 00 00 00
-    buffer.push_back(std::byte{ 3 }); buffer.push_back(std::byte{ 0 }); buffer.push_back(std::byte{ 0 }); buffer.push_back(std::byte{ 0 });
-
-    // Payload: ABC
-    buffer.push_back(std::byte{ 'A' }); buffer.push_back(std::byte{ 'B' }); buffer.push_back(std::byte{ 'C' });
-
-    // Act
-    ParsedRequest req = Message::parseRequest(buffer);
-
-    // Assert
-    EXPECT_EQ(req.userId, 1234);
-    EXPECT_EQ(req.version, 1);
-    EXPECT_EQ(req.op, 200);
-    EXPECT_EQ(req.filename, "test");
-    ASSERT_EQ(req.payload.size(), 3);
-    EXPECT_EQ(req.payload[0], std::byte{ 'A' });
+    ASSERT_EQ(buffer.size(), 4);
+    EXPECT_EQ(buffer[0], std::byte{ 0x78 }); // LSB First
+    EXPECT_EQ(buffer[3], std::byte{ 0x12 }); // MSB Last
 }
 
-TEST(ProtocolTests, ParseRequest_ListFiles_ParsesCorrectly) {
-    // Op 203 (List) is special: No filename, no size, no payload.
-    // Structure: UserID(4), Ver(1), Op(1) -> Total 6 bytes.
+TEST(BufferUtilsTests, ExtractInt_ReadsLittleEndian) {
+    std::vector<std::byte> buffer = { std::byte{0x78}, std::byte{0x56}, std::byte{0x34}, std::byte{0x12} };
+    size_t offset = 0;
 
-    std::vector<std::byte> buffer;
-    // User: 1234
-    buffer.push_back(std::byte{ 0xD2 }); buffer.push_back(std::byte{ 0x04 }); buffer.push_back(std::byte{ 0x00 }); buffer.push_back(std::byte{ 0x00 });
-    // Version: 1
-    buffer.push_back(std::byte{ 1 });
-    // Op: 203
-    buffer.push_back(std::byte{ 203 });
+    uint32_t val = BufferUtils::extractInt<uint32_t>(buffer, offset);
 
-    ParsedRequest req = Message::parseRequest(buffer);
-
-    EXPECT_EQ(req.userId, 1234);
-    EXPECT_EQ(req.op, 203);
-    EXPECT_TRUE(req.filename.empty()); // Should be empty
-    EXPECT_TRUE(req.payload.empty());  // Should be empty
+    EXPECT_EQ(val, 0x12345678);
+    EXPECT_EQ(offset, 4);
 }
 
-// --- Protocol Packing Tests (Server -> Client) ---
-
-TEST(ProtocolTests, PackResponse_SuccessWithPayload_CreatesCorrectBuffer) {
-    // Simulating response 210 (File Found)
-    // Structure: Ver(1), Status(2), NameLen(2), Name, Size(4), Payload
-
-    uint8_t version = 1;
-    uint16_t status = 210;
-    std::string filename = "hi";
-    std::vector<std::byte> payload = { std::byte{0xFF} };
-
-    std::vector<std::byte> result = Message::packResponse(version, status, filename, payload);
-
-    // Checks
-    // Ver
-    EXPECT_EQ(result[0], std::byte{ 1 });
-    // Status 210 (0x00D2) -> D2 00
-    EXPECT_EQ(result[1], std::byte{ 0xD2 });
-    EXPECT_EQ(result[2], std::byte{ 0x00 });
-    // NameLen 2 -> 02 00
-    EXPECT_EQ(result[3], std::byte{ 2 });
-    EXPECT_EQ(result[4], std::byte{ 0 });
-    // Name "hi"
-    EXPECT_EQ(result[5], std::byte{ 'h' });
-    EXPECT_EQ(result[6], std::byte{ 'i' });
-    // Size 1 -> 01 00 00 00
-    EXPECT_EQ(result[7], std::byte{ 1 });
-    EXPECT_EQ(result[10], std::byte{ 0 });
-    // Payload
-    EXPECT_EQ(result[11], std::byte{ 0xFF });
+TEST(ProtocolTests, RequestHeaderFixed_SizeIs8Bytes) {
+    // קריטי לוודא שאין Padding
+    EXPECT_EQ(sizeof(RequestHeaderFixed), 8);
 }
 
-TEST(ProtocolTests, PackResponse_ErrorNoFiles_CreatesShortBuffer) {
-    // Status 1002 (No files) -> "Only status and version fields"
-    // Structure: Ver(1), Status(2) -> Total 3 bytes.
+TEST(ProtocolTests, ResponseHeaderFixed_SizeIs5Bytes) {
+    // קריטי לוודא שאין Padding
+    EXPECT_EQ(sizeof(ResponseHeaderFixed), 5);
+}
 
-    std::vector<std::byte> result = Message::packResponse(1, 1002);
-
-    ASSERT_EQ(result.size(), 3);
-    EXPECT_EQ(result[0], std::byte{ 1 });
-    // Status 1002 (0x03EA) -> EA 03
-    EXPECT_EQ(result[1], std::byte{ 0xEA });
-    EXPECT_EQ(result[2], std::byte{ 0x03 });
+TEST(ProtocolTests, Enums_ValuesAreCorrect) {
+    EXPECT_EQ(OP_SAVE_FILE, 200);
+    EXPECT_EQ(STATUS_ERROR_FILE_NOT_FOUND, 1001);
 }

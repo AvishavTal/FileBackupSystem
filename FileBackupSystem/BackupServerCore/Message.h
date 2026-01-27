@@ -27,9 +27,10 @@ struct ParsedRequest {
 	uint8_t op;
 	uint16_t filenameLen;
 	std::string filename;
+	uint32_t payloadSize;
 	std::vector<std::byte> payload;
 
-	ParsedRequest() :userId(0), version(0), op(0), filenameLen(0) {}
+	ParsedRequest() :userId(0), version(0), op(0), filenameLen(0), payloadSize(0) {}
 };
 
 class Message {
@@ -41,6 +42,14 @@ public:
 		 * @throws std::runtime_error if the buffer is too short or invalid.
 		 */
 	static ParsedRequest parseRequest(const std::vector<std::byte>& buffer);
+
+	/**
+	 * Reads ONLY the header (ID, Op, Filename, PayloadSize).
+	 * Does NOT read the payload content itself.
+	 * @param buffer The input buffer containing at least the full header.
+	 * @param bytesRead Output parameter: returns how many bytes were consumed by the header.
+	 */
+	static ParsedRequest parseHeader(const std::vector<std::byte>& buffer, size_t& bytesRead);
 	
 	/**
 	 * Packs data into a raw byte buffer ready to be sent as a Response.

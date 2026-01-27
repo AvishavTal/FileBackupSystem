@@ -50,6 +50,11 @@ std::vector<std::byte> FileStorage::restoreFile(unsigned int userId, const std::
 	return readFile(fullFilePath);
 }
 
+std::string FileStorage::getAbsolutePath(unsigned int userId, const std::string& filename) const
+{
+	return prepareFilePath(userId, filename).string();
+}
+
 // ==========================================
 // Private Helper Functions
 // ==========================================

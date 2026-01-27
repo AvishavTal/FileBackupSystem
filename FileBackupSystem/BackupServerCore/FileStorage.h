@@ -17,6 +17,7 @@ public:
 	 * Retrieves the content of a specific file.
 	 */
 	std::vector<std::byte> restoreFile(unsigned int userId, const std::string& filename);
+	std::string getAbsolutePath(unsigned int userId, const std::string& filename) const;
 private:
 	void validateFilename(const std::string& filename) const;
 	std::filesystem::path getOrCreateUserDir(unsigned int userId) const;
